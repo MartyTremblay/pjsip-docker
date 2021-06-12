@@ -1,59 +1,39 @@
 # -*- Dockerfile -*-
-
-FROM debian:jessie
 MAINTAINER MartyTremblay
 
-RUN apt-get update -qq && \
-    DEBIAN_FRONTEND=noninteractive \
-    apt-get install -y --no-install-recommends \
-            build-essential \
-            ca-certificates \
-            curl \
-            libgsm1-dev \
-            libspeex-dev \
-            libspeexdsp-dev \
-            libsrtp0-dev \
-            libssl-dev \
-            portaudio19-dev \
-            python \
-            python-dev \
-            python-pip \
-            python-virtualenv \
-            && \
-    apt-get purge -y --auto-remove && rm -rf /var/lib/apt/lists/*
+FROM alpine:3.10
+ENV LANG=C.UTF-8
 
-RUN pip install paho-mqtt
+ARG VERSION_PJSIP=2.10
 
-COPY config_site.h /tmp/
-
-ENV PJSIP_VERSION=2.5.5
-RUN mkdir /usr/src/pjsip && \
-    cd /usr/src/pjsip && \
-    curl -vsL http://www.pjsip.org/release/${PJSIP_VERSION}/pjproject-${PJSIP_VERSION}.tar.bz2 | \
-         tar --strip-components 1 -xj && \
-    mv /tmp/config_site.h pjlib/include/pj/ && \
-    CFLAGS="-O2 -DNDEBUG" \
-    ./configure --enable-shared \
-                --disable-opencore-amr \
-                --disable-resample \
-                --disable-sound \
-                --disable-video \
-                --with-external-gsm \
-                --with-external-pa \
-                --with-external-speex \
-                --with-external-srtp \
-                --prefix=/usr \
-                && \
-    make all install && \
-    /sbin/ldconfig # && \
- #   rm -rf /usr/src/pjsip
-
-#ADD https://raw.githubusercontent.com/MartyTremblay/sip2mqtt/master/sip2mqtt.py /opt/sip2mqtt/sip2mqtt.py
-RUN curl -L https://raw.githubusercontent.com/MartyTremblay/sip2mqtt/master/sip2mqtt.py -o /opt/sip2mqtt/sip2mqtt.py
-#RUN wget https://raw.githubusercontent.com/MartyTremblay/sip2mqtt/master/sip2mqtt.py -O /opt/sip2mqtt/sip2mqtt.py
-
-RUN cd /usr/src/pjsip/pjsip-apps/src/python && \
-    python setup.py build && python setup.py install
-
+RUN apk add --no-cache python2 py2-paho-mqtt \
+    && python -m ensurepip \
+    && rm -r /usr/lib/python*/ensurepip \
+    && pip install --upgrade pip setuptools \
+    && rm -r /root/.cache \
+    && apk add --no-cache --virtual .build4pjsip alpine-sdk \
+    && apk add --no-cache libsrtp-dev python2-dev openssl-dev linux-headers \
+    && curl -L -s -S https://raw.githubusercontent.com/MartyTremblay/sip2mqtt/master/sip2mqtt.py -o /opt/sip2mqtt/sip2mqtt.py  \
+    && cd \
+    && curl -L -s -S "https://github.com/pjsip/pjproject/archive/${VERSION_PJSIP}.tar.gz" | tar -xz \
+    && cd "pjproject-${VERSION_PJSIP}" \
+    && ./configure \
+      --with-external-srtp \
+      --enable-shared \
+      --disable-sound \
+      --disable-sdl \
+      --disable-speex-aec \
+      --disable-video \
+      --prefix=/usr/local > /dev/null \
+    \
+    && make dep \
+    && make \
+    && make install \
+    && cd pjsip-apps/src/python \
+    && make \
+    && make install \
+    && cd \
+    && rm -rf "pjproject-${VERSION_PJSIP}" \
+    && apk del .build4pjsip
 
 CMD ["python", "/opt/sip2mqtt/sip2mqtt.py", ""]
